@@ -1,34 +1,34 @@
 // 观察者(发布订阅) 观察者 被观察者
-class Dep{
-  constructor(){
+class Dep {
+  constructor() {
     this.subs = [] // 存放所有的watcher
   }
-  addSub(watcher){ // 添加watcher的方法
+  addSub(watcher) { // 添加watcher的方法
     this.subs.push(watcher)
   }
   // 发布
-  notify(){
+  notify() {
     this.subs.forEach(watcher => watcher.update())
   }
 }
 
-class Watcher{
-  constructor(vm, expr, cb){
+class Watcher {
+  constructor(vm, expr, cb) {
     this.vm = vm
     this.expr = expr
     this.cb = cb
     // 默认先存放一个之前的值
     this.oldValue = this.get()
   }
-  get(){ // vm.$data.school vm.$data.school.name
+  get() { // vm.$data.school vm.$data.school.name
     Dep.target = this; // 把自己放到this上
     let value = CompileUtil.getVal(this.vm, this.expr)
-    Dep.target = null
+    Dep.target = null // 不取消 任何值取值 都会添加watcher
     return value
   }
-  update(){ // 更新操作 数据变化后 会调用观察者的update方法
+  update() { // 更新操作 数据变化后 会调用观察者的update方法
     let newVal = CompileUtil.getVal(this.vm, this.expr)
-    if(newVal !== this.oldValue){
+    if (newVal !== this.oldValue) {
       this.cb(newVal)
     }
   }
@@ -38,30 +38,30 @@ class Watcher{
 // })
 
 
-class Observer{ // 实现数据劫持
-  constructor(data){
+class Observer { // 实现数据劫持
+  constructor(data) {
     this.observer(data)
   }
-  observer(data){
+  observer(data) {
     // 如果是对象才观察
-    if(data && typeof data == 'object'){
+    if (data && typeof data == 'object') {
       // 如果是对象
-      for(let key in data){
+      for (let key in data) {
         this.defineReactive(data, key, data[key])
       }
     }
   }
-  defineReactive(obj, key, value){
+  defineReactive(obj, key, value) {
     this.observer(value) // people: [watcher, watcher] b: [watcher]
     let dep = new Dep() // 给每一个属性都加上一个具有发布和订阅的功能
-    Object.defineProperty(obj,key,{
-      get(){
+    Object.defineProperty(obj, key, {
+      get() {
         // 创建watcher时 会取到对应的内容，并且把watcher放到了全局上
         Dep.target && dep.addSub(Dep.target)
         return value
       },
-      set:(newVal) => {// {people:{name: '2zz'}} people={}
-        if(newVal != value){
+      set: (newVal) => { // {people:{name: '2zz'}} people={}
+        if (newVal != value) {
           this.observer(newVal)
           value = newVal
           dep.notify();
@@ -72,8 +72,8 @@ class Observer{ // 实现数据劫持
 }
 
 // 基类 调度
-class Compiler{
-  constructor(el, vm){
+class Compiler {
+  constructor(el, vm) {
     // 判断el属性是否是一个元素
     // 不是元素就获取
     this.el = this.isElementNode(el) ? el : document.querySelector(el)
@@ -96,12 +96,16 @@ class Compiler{
   compileElement(node) {
     let attributes = node.attributes; // 类数组
     [...attributes].forEach(attr => {
-      let {name, value:expr} = attr; // v-model = "people.msg"
+      let {
+        name,
+        value: expr
+      } = attr; // v-model = "people.msg"
       // 判断是否是v-xxx这种形式的指令
-      if(this.isDirective(name)){
-        let [,directive] = name.split('-')// v-model v-html
+      if (this.isDirective(name)) {
+        let [, directive] = name.split('-') // v-model v-html v-bind
+        let [directiveName, eventName] = directive.split(':') // v-on:click
         // 需要调用不同的指令来处理
-        CompileUtil[directive](node, expr,this.vm);
+        CompileUtil[directiveName](node, expr, this.vm, eventName);
       }
     })
   }
@@ -110,7 +114,7 @@ class Compiler{
     // 判断当前文本节点中内容是否包含mustach {{xxx}}
     let content = node.textContent
     // 使用正则匹配到所有文本
-    if(/\{\{(.+?)\}\}/.test(content)){
+    if (/\{\{(.+?)\}\}/.test(content)) {
       // 文本节点
       CompileUtil['text'](node, content, this.vm); //content: {{a}} {{b}}
     }
@@ -121,7 +125,7 @@ class Compiler{
     let childNodes = node.childNodes;
     // childNodes是类数组 用es6展开运算符变成数组
     [...childNodes].forEach(child => {
-      if(this.isElementNode(child)){
+      if (this.isElementNode(child)) {
         this.compileElement(child)
         // 如果是元素的话 需要把自己传进去 在去遍历子节点
         this.compile(child)
@@ -131,11 +135,11 @@ class Compiler{
     })
   }
   // 把节点移动到内存中
-  node2fragment(node){
+  node2fragment(node) {
     // 创建一个文档碎片
     let fragment = document.createDocumentFragment()
     let firstChild;
-    while(firstChild = node.firstChild){
+    while (firstChild = node.firstChild) {
       // appendChild具有移动性
       fragment.appendChild(firstChild)
     }
@@ -149,40 +153,59 @@ class Compiler{
 }
 CompileUtil = {
   // 根据表达式取到对应的数据
-  getVal(vm, expr){ // vm.$data 'people.name' [people,name]
-    return expr.split('.').reduce((data, current)=>{
+  getVal(vm, expr) { // vm.$data 'people.name' [people,name]
+    return expr.split('.').reduce((data, current) => {
       return data[current]
     }, vm.$data)
 
   },
+  setValue(vm, expr, value) { // vm.$data 'people.name' = zth
+    expr.split('.').reduce((data, current, index, arr) => {
+      if (index == arr.length - 1) {
+        return data[current] = value
+      }
+      return data[current]
+    }, vm.$data)
+  },
   // 解析v-model这个指令
-  model(node, expr, vm){// node是节点 expr是表达式 vm是当前实例
+  model(node, expr, vm) { // node是节点 expr是表达式 vm是当前实例
     // 给输入框赋予value属性
     let fn = this.updater['modelUpdater']
-    new Watcher(vm, expr, (newVal)=>{ // 给输入框加一个观察者 稍后数据更新 会触发此方法 会拿新值给输入框赋值
+    new Watcher(vm, expr, (newVal) => { // 给输入框加一个观察者 稍后数据更新 会触发此方法 会拿新值给输入框赋值
       fn(node, newVal)
     })
     node.addEventListener('input', (e) => {
       let value = e.target.value // 获取用户当前输入的值
+      this.setValue(vm, expr, value)
     })
-    let value = this.getVal(vm,expr) // 3zz
+    let value = this.getVal(vm, expr) // 3zz
     fn(node, value)
   },
-  html(){
-
+  html(node, expr, vm) {
+    let fn = this.updater['htmlUpdater']
+    new Watcher(vm, expr, (newVal) => {
+      fn(node, newVal)
+    })
+    let value = this.getVal(vm, expr)
+    fn(node, value)
   },
-  getContentValue(vm, expr){
+  getContentValue(vm, expr) {
     // 遍历表达式 将内容重新替换成一个完整的内容
     return expr.replace(/\{\{(.+?)\}\}/g, (...args) => {
       return this.getVal(vm, args[1])
     })
   },
-  text(node, expr, vm){ // expr => {{a}} {{b}} {{c}}
+  on(node, expr, vm, eventName) { // expr: v-on:click="changne"
+    node.addEventListener(eventName, (e) => {
+      vm[expr].call(vm, e); // this.change
+    })
+  },
+  text(node, expr, vm) { // expr => {{a}} {{b}} {{c}}
     let fn = this.updater['textUpdater'];
-    let content = expr.replace(/\{\{(.+?)\}\}/g, (...args)=> {
+    let content = expr.replace(/\{\{(.+?)\}\}/g, (...args) => {
       // 给表达式每个{{}}都加上观察者
-      new Watcher(vm, args[1], (newVal) => {
-        fn(this.getContentValue(vm, expr)); // 返回了一个全的字符串
+      new Watcher(vm, args[1], () => {
+        fn(node, this.getContentValue(vm, expr)); // 返回了一个全的字符串
       })
       return this.getVal(vm, args[1]);
     });
@@ -190,28 +213,60 @@ CompileUtil = {
   },
   updater: {
     // 把数据插入到节点中
-    modelUpdater(node, value){
+    modelUpdater(node, value) {
       node.value = value
     },
-    htmlUpdater(){
-
+    htmlUpdater(node, value) {
+      node.innerHTML = value
     },
     // 处理文本节点
-    textUpdater(node, value){
+    textUpdater(node, value) {
       node.textContent = value
     }
   }
 }
 
-class Vue{
+class Vue {
   constructor(options) {
     this.$el = options.el
     this.$data = options.data
-    if(this.$el){
+    let computed = options.computed
+    let methods = options.methods
+    if (this.$el) {
+
       // 把数据全部转化成用 Object.defineProperty来定义
       new Observer(this.$data)
-      console.log(this.$data)
+
+      // 吧数据获取操作 vm上的取值操作 都代理到vm.$data上
+
+      for (let key in computed) { // 有依赖关系 数据变化
+        Object.defineProperty(this.$data, key, {
+          get: () => {
+            return computed[key].call(this);
+          }
+        })
+      }
+      for (let key in methods){
+        Object.defineProperty(this, key,{
+          get(){
+            return methods[key]
+          }
+        })
+      }
+      this.proxyVm(this.$data)
       new Compiler(this.$el, this)
+    }
+  }
+  proxyVm(data) {
+    for (let key in data) {
+      Object.defineProperty(this, key, {
+        get() {
+          return data[key] // 进行了转化操作
+        },
+        set(newVal){ // 设置代理方法
+          data[key] = newVal
+        }
+      })
     }
   }
 }
